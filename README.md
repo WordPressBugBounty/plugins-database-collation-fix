@@ -1,0 +1,1 @@
+# plugins-database-collation-fix
