@@ -2,23 +2,25 @@
 /**
 Plugin Name: Database Collation Fix
 Plugin URL: https://davejesch.com/plugins/databasecollationfix
-Description: Convert tables using utf8mb4_unicode_520_ci or utf8_unicode_520_ci collation to standard collation on a cron interval, plus on DesktopServer Create, Copy, Move, Import and Export operations.
-Version: 1.2.10
+Description: Convert tables using utf8mb4_unicode_520_ci or utf8_unicode_520_ci collation to standard collation on a cron interval.
+Version: 1.2.11
 Author: Dave Jesch
 Author URI: http://davejesch.com
 Network: True
-Text Domain: database-collation-fix
+Text Domain: databasecollationfix
 Domain path: /language
-License: GNU General Public License, version 2 http://www.gnu.org/license/gpl-20.0.html
+License: GPLv2
+License URI: http://www.gnu.org/license/gpl-20.0.html
 */
+
+if ( ! defined( 'ABSPATH' ) ) exit;
 
 class DS_DatabaseCollationFix
 {
-	private static $_instance = NULL;
+	private static $_instance = null;
 
-	const VERSION = '1.2.10';
+	const VERSION = '1.2.11';
 	const CRON_NAME = 'ds_database_collation_fix';
-	const TRIGGER_FILE = 'trigger.txt';
 
 	/* Collation Algorithm to change database to: */
 	private $_collation = 'utf8mb4_unicode_ci';
@@ -59,13 +61,13 @@ class DS_DatabaseCollationFix
 	 */
 	public static function get_instance()
 	{
-		if (NULL === self::$_instance)
+		if (null === self::$_instance)
 			self::$_instance = new self();
 		return self::$_instance;
 	}
 
 	/**
-	 * Callback for 'init' action. Used to set up cron and check for trigger set by DesktopServer prepend.php actions
+	 * Callback for 'init' action. Used to set up cron.
 	 */
 	public function init()
 	{
@@ -76,12 +78,6 @@ $this->_log(__METHOD__.'() starting');
 
 		add_action(self::CRON_NAME, array(__CLASS__, 'cron_run'));
 
-		if (file_exists($trigger_file = dirname(__FILE__) . DIRECTORY_SEPARATOR . self::TRIGGER_FILE)) {
-$this->_log(__METHOD__.'() trigger file found');
-			add_action('wp_loaded', array(__CLASS__, 'cron_run'));
-			@unlink($trigger_file);
-		}
-
 		if (is_admin() && current_user_can('manage_options'))
 			add_action('admin_menu', array($this, 'admin_menu'));
 	}
@@ -90,13 +86,13 @@ $this->_log(__METHOD__.'() trigger file found');
 	 * Updates the Cron schedule, adding the CRON_NAME to be triggered once per day at midnight.
 	 * @param string $interval
 	 */
-	private function _update_schedule($interval = NULL)
+	private function _update_schedule($interval = null)
 	{
 		if ( defined( 'WP_INSTALLING' ) && WP_INSTALLING )
 			return;				// do nothing if WP is trying to install
 
 		$time_start = strtotime('yesterday');
-		if (NULL === $time_start)
+		if (null === $time_start)
 			$interval = DAY_IN_SECONDS;
 
 		$timestamp = $time_start + $interval;
@@ -125,10 +121,17 @@ $this->_log_action(__METHOD__);
 		$force = FALSE;
 		$force_algorithm = 'utf8mb4_unicode_ci';
 		if (isset($_SERVER['REQUEST_METHOD']) && 'POST' === $_SERVER['REQUEST_METHOD']) {
-			if (isset($_POST['force-collation']) && '1' === $_POST['force-collation']) {
-				$force = TRUE;
-				if (isset($_POST['force-collation-algorithm']))
-					$force_algorithm = $_POST['force-collation-algorithm'];
+			// note: nonce verification done in admin_page
+			if (isset($_POST['force-collation']) && '1' === $_POST['force-collation']) {  // phpcs:ignore
+				if (isset($_POST['force-collation-algorithm'])) {  // phpcs:ignore
+					// CVE-2023-23997 make sure forced algorithm is an expected value
+					$value = sanitize_key($_POST['force-collation-algorithm']);  // phpcs:ignore
+					$algos = array('utf8mb4_unicode_ci', 'utf8mb4_general_ci', 'utf8_unicode_ci', 'utf8_general_ci');
+					if (in_array($value, $algos)) {
+						$force_algorithm = $value;
+						$force = TRUE;
+					}
+				}
 				$this->_collation = $force_algorithm;
 			}
 		}
@@ -138,15 +141,17 @@ $this->_log_action(__METHOD__);
 		if ($report) {
 			echo '<div style="width:100%; margin-top:15px">';
 			if ($force) {
-				echo '<p>', sprintf(__('Forcing Collation Algorithm to: <b>%s</b>.', 'database-collation-fix'),
-					$force_algorithm), '</p>';
+				// translators: %s the new collation algorithm to use
+				echo '<p>', esc_html(sprintf(__('Forcing Collation Algorithm to: <b>%s</b>.', 'databasecollationfix'),
+					$this->_collation)), '</p>';
 			}
 		}
 
-		$this->_report(sprintf(__('Changing database Collation Algorithm to: %s', 'database-collation-fix'),
-			($force ? $force_algorithm : $this->_collation)));
-		$sql = 'ALTER DATABASE `' . DB_NAME . '` COLLATE=' . ($force ? $force_algorithm : $this->_collation);
-		$res = $wpdb->query($sql);
+		// translators: %s the new collation algorithm to use
+		$this->_report(sprintf(__('Changing database Collation Algorithm to: %s', 'databasecollationfix'),
+			$this->_collation));
+		$sql = 'ALTER DATABASE `' . DB_NAME . '` COLLATE=' . $this->_collation;
+		$res = $wpdb->query($sql);  // phpcs:ignore
 $this->_report($sql, TRUE);
 
 		// search for this collation method
@@ -155,13 +160,14 @@ $this->_report($sql, TRUE);
 
 		// get all tables that match $wpdb's table prefix
 		$sql = "SHOW TABLES LIKE '{$wpdb->prefix}%'";
-		$res = $wpdb->get_col($sql);
-		if (NULL !== $res) {
+		$res = $wpdb->get_col($sql);  // phpcs:ignore
+		if (null !== $res) {
 			foreach ($res as $table) {
-				$this->modify_table($table, $collation_term, $force_algorithm, $force);
+				$this->modify_table($table, $collation_term, $this->_collation, $force);
 		}
 
-		$this->_report(sprintf(__('Altered %1$d tables, %2$d columns and %3$d indexes.', 'database-collation-fix'),
+		// translators: %1$s number of tables altered %2$d number of database columns altered %3$d number of database indexes altered
+		$this->_report(sprintf(__('Altered %1$d tables, %2$d columns and %3$d indexes.', 'databasecollationfix'),
 			$this->table_count, $this->column_count, $this->index_count));
 		if ($report)
 			echo '</div>';
@@ -183,11 +189,12 @@ $this->_log(__METHOD__.'() checking table ' . $table);
 		// create a list of any indexes that need to be recreated after column alterations
 		$indexes = array();
 
-		$this->_report(sprintf(__('Checking table "%s"...', 'database-collation-fix'), $table));
+		// translators: %s database table name
+		$this->_report(sprintf(__('Checking table "%s"...', 'databasecollationfix'), $table));
 		// check how the table was created
 		$sql = "SHOW CREATE TABLE `{$table}`";
-		$create_table_res = $wpdb->get_row($sql, ARRAY_A);
-$this->_log(__METHOD__.'() res=' . var_export($create_table_res, TRUE));
+		$create_table_res = $wpdb->get_row($sql, ARRAY_A);  // phpcs:ignore
+$this->_log(__METHOD__.'() res=' . var_export($create_table_res, TRUE));  // phpcs:ignore
 		$create_table = $create_table_res['Create Table'];
 //$this->_report('create table=' . $create_table);
 
@@ -197,7 +204,7 @@ $this->_log(__METHOD__.'() res=' . var_export($create_table_res, TRUE));
 //$this->_report('create table: ' . var_export($create_table, TRUE));
 		while ($offset < strlen($create_table)) {
 			$pos = stripos($create_table, 'FULLTEXT KEY', $offset);
-$this->_report('searching FULLTEXT INDEX: ' . var_export($pos, TRUE));
+$this->_report('searching FULLTEXT INDEX: ' . var_export($pos, TRUE));  // phpcs:ignore
 			if (FALSE === $pos)
 				break;
 
@@ -218,7 +225,7 @@ $this->_report('found index [' . $idx_name . '] of [' . $col_names . ']');
 			++$this->index_count;
 			$sql = "ALTER TABLE `{$table}` DROP INDEX `{$idx_name}`";
 $this->_report('removing index: ' . $sql);
-			$wpdb->query($sql);
+			$wpdb->query($sql);  // phpcs:ignore
 		}
 
 		// determine current collation value
@@ -244,24 +251,25 @@ $this->_report('removing index: ' . $sql);
 			($force && $old_coll !== $force_algorithm)) {
 $this->_log(__METHOD__.'() checking collation: ' . $collation_term);
 			$new_coll = $force ? $force_algorithm : $this->_collation;
-			$this->_report(sprintf(__('- found "%1$s" and ALTERing to "%2$s"...', 'database-collation-fix'),
+			// translators: %1$s current collation algorithm %2$s new collation algorithm
+			$this->_report(sprintf(__('- found "%1$s" and ALTERing to "%2$s"...', 'databasecollationfix'),
 				$old_coll, $new_coll));
 			++$this->table_count;
 
 			$sql = "ALTER TABLE `{$table}` COLLATE={$new_coll}";
 $this->_report($sql, TRUE);
-			$alter = $wpdb->query($sql);
-$this->_log(__METHOD__.'() sql=' . $sql . ' res=' . var_export($alter, TRUE));
+			$alter = $wpdb->query($sql);  // phpcs:ignore
+$this->_log(__METHOD__.'() sql=' . $sql . ' res=' . var_export($alter, TRUE));  // phpcs:ignore
 			$mod = TRUE;
 		}
 		if (!$mod) {
-			$this->_report(__('- no ALTERations required.', 'database-collation-fix'));
+			$this->_report(__('- no ALTERations required.', 'databasecollationfix'));
 		}
 
 		// check column collation and modify if it's an undesired algorithm
 		$sql = "SHOW FULL COLUMNS FROM `{$table}`";
-		$columns_res = $wpdb->get_results($sql, ARRAY_A);
-		if (NULL !== $columns_res) {
+		$columns_res = $wpdb->get_results($sql, ARRAY_A);  // phpcs:ignore
+		if (null !== $columns_res) {
 			foreach ($columns_res as $row) {
 $this->_log(__METHOD__.'() checking collation of column `' . $row['Field'] . '`: `' . $row['Collation'] . '`: (' . implode(',', $this->_change_collation) . ')');
 //$this->_report(__LINE__ . ':row [' . var_export($row, true) . ']', true); #!#
@@ -282,7 +290,8 @@ $this->_log(__METHOD__.'() updating column\'s collation');
 					$default = (null !== $row['Default']) ? " DEFAULT '{$row['Default']}' " : '';
 //$this->_report(__LINE__ . ':default [' . $default . ']', true); #!#
 
-					$this->_report(sprintf(__('- found column `%1$s` with collation of "%2$s" and ALTERing to "%3$s".', 'database-collation-fix'),
+					// translators: %1$s database column name %2$s current collumn collation value %3$s new collation value
+					$this->_report(sprintf(__('- found column `%1$s` with collation of "%2$s" and ALTERing to "%3$s".', 'databasecollationfix'),
 						$row['Field'], $row['Collation'], $this->_collation));
 //					$row['Collation'] = $this->_collation;
 					++$this->column_count;
@@ -291,8 +300,8 @@ $this->_log(__METHOD__.'() updating column\'s collation');
 					$sql = "ALTER TABLE `{$table}`
 						CHANGE `{$row['Field']}` `{$row['Field']}` {$row['Type']} COLLATE {$this->_collation} {$null} {$default}";
 $this->_report($sql, TRUE);
-					$alter_res = $wpdb->query($sql);
-$this->_log(__METHOD__.'() alter=' . $sql . ' res=' . var_export($alter_res, TRUE));
+					$alter_res = $wpdb->query($sql);  // phpcs:ignore
+$this->_log(__METHOD__.'() alter=' . $sql . ' res=' . var_export($alter_res, TRUE));  // phpcs:ignore
 				}
 			}
 		}
@@ -301,7 +310,8 @@ $this->_log(__METHOD__.'() alter=' . $sql . ' res=' . var_export($alter_res, TRU
 		// CREATE FULLTEXT INDEX `idxname` ON `tablename` (col1, col2)
 		foreach ($indexes as $idx) {
 $this->_report('adding back the index: ' . $idx);
-			$wpdb->query($idx);
+			// note: query constructed above with sanitized data
+			$wpdb->query($idx);  // phpcs:ignore
 		}
 	}
 
@@ -319,7 +329,7 @@ $this->_report('adding back the index: ' . $idx);
 				$out = FALSE;
 
 			if ($out || $this->_output)
-				echo $message, ($this->_output ? PHP_EOL : '<br/>');
+				echo esc_html($message), ($this->_output ? PHP_EOL : '<br/>');
 		}
 	}
 
@@ -331,18 +341,14 @@ $this->_report('adding back the index: ' . $idx);
 	{
 		$this->_output = $output;
 	}
-	public function set_report($report)
-	{
-		$this->_report = $report;
-	}
 
 	/**
 	 * Callback for the 'admin_menu' action. Used to add the menu item to the Tools menu
 	 */
 	public function admin_menu()
 	{
-		add_management_page(__('Collation Fix', 'database-collation-fix'),	// page title
-			__('Collation Fix', 'database-collation-fix'),					// menu title
+		add_management_page(__('Collation Fix', 'databasecollationfix'),	// page title
+			__('Collation Fix', 'databasecollationfix'),					// menu title
 			'manage_options',												// capability
 			'ds-db-collation',												// menu_slug
 			array($this, 'admin_page'));									// callback
@@ -355,24 +361,27 @@ $this->_report('adding back the index: ' . $idx);
 	{
 		$perform_action = false;
 
-		if (isset($_SERVER['REQUEST_METHOD']) && 'POST' === $_SERVER['REQUEST_METHOD'] && isset($_POST['collation-fix'])) {
-			if (wp_verify_nonce($_POST['collation-nonce'], 'collation-action') && current_user_can('manage_options')) {
+		if (isset($_SERVER['REQUEST_METHOD']) && 'POST' === $_SERVER['REQUEST_METHOD'] &&
+			isset($_POST['collation-fix']) && isset($_POST['collation-nonce'])) {
+			if (wp_verify_nonce(sanitize_key($_POST['collation-nonce']), 'collation-action') &&
+				current_user_can('manage_options')) {
 				$perform_action = true;
 			}
 		}
-	//echo '<pre>', 'perform=', ($perform_action ? 'true' : 'false'), PHP_EOL, var_export($_POST, true), '</pre>';
+//echo '<pre>', 'perform=', ($perform_action ? 'true' : 'false'), PHP_EOL, var_export($_POST, true), '</pre>';
 
 		echo '<div class="wrap">';
-		echo '<h2>', sprintf(__('Database Collation Fix%1$s tool', 'database-collation-fix'), ' v' . self::VERSION), '</h2>';
-		echo '<p>', __('This tool is used to convert your site\'s database tables from using the ...unicode_520_ci Collation Algorithms to use a slightly older, but more compatible utf8mb4_unicode_ci Collation Algorithm.', 'database-collation-fix'), '</p>';
-		echo '<p>', __('The tool will automatically run every 24 hours and change any newly created database table. Or, you can use the button below to perform the database alterations on demand.', 'database-collation-fix'), '</p>';
+		// translators: %1$s the plugin's version number
+		echo '<h2>', esc_html(sprintf(__('Database Collation Fix%1$s tool', 'databasecollationfix'), ' v' . self::VERSION)), '</h2>';
+		echo '<p>', esc_html(__('This tool is used to convert your site\'s database tables from using the ...unicode_520_ci Collation Algorithms to use a slightly older, but more compatible utf8mb4_unicode_ci Collation Algorithm.', 'databasecollationfix')), '</p>';
+		echo '<p>', esc_html(__('The tool will automatically run every 24 hours and change any newly created database table. Or, you can use the button below to perform the database alterations on demand.', 'databasecollationfix')), '</p>';
 
 		echo '<form action="', esc_url(add_query_arg('action', 'run')), '" method="post">';
 		echo '<p>';
 		wp_nonce_field('collation-action', 'collation-nonce', true, true);
 		echo '<input type="hidden" name="force-collation" value="0" />';
 		echo '<input type="checkbox" name="force-collation" value="1" />';
-		echo '&nbsp;', __('Force Collation Algorithm to: ', 'database-collation-fix');
+		echo '&nbsp;', esc_html(__('Force Collation Algorithm to: ', 'databasecollationfix'));
 
 		echo '<select name="force-collation-algorithm">';
 		echo '<option value="utf8mb4_unicode_ci">utf8mb4_unicode_ci</option>';
@@ -382,7 +391,8 @@ $this->_report('adding back the index: ' . $idx);
 		echo '</select>';
 		echo '</p>';
 
-		echo '<input type="submit" name="collation-fix" class="button-primary" value="', __('Fix Database Collation', 'database-collation-fix'), '" />';
+		echo '<input type="submit" name="collation-fix" class="button-primary" value="',
+			esc_html(__('Fix Database Collation', 'databasecollationfix')), '" />';
 		echo '</form>';
 
 		if ($perform_action) {
@@ -425,15 +435,15 @@ $this->_report('adding back the index: ' . $idx);
 	{
 return;
 		$file = dirname(__FILE__) . '/~log.txt';
-		$fh = @fopen($file, 'a+');
+		$fh = @fopen($file, 'a+');  // phpcs:ignore
 		if (FALSE !== $fh) {
-			if (NULL === $msg)
-				fwrite($fh, date('Y-m-d H:i:s'));
+			if (null === $msg)
+				fwrite($fh, current_time('mysql', false));  // phpcs:ignore
 			else
-				fwrite($fh, date('Y-m-d H:i:s - ') . $msg . "\r\n");
+				fwrite($fh, current_time('mysql', false) . $msg . "\r\n");  // phpcs:ignore
 
 			if ($backtrace) {
-				$callers = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+				$callers = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);	// phpcs:ignore
 				array_shift($callers);
 				$path = dirname(dirname(dirname(plugin_dir_path(__FILE__)))) . DIRECTORY_SEPARATOR;
 
@@ -452,13 +462,13 @@ return;
 						$file .= ':' . $caller['line'];
 					$frame = $func . ' - ' . $file;
 					$out = '    #' . ($n++) . ': ' . $frame . PHP_EOL;
-					fwrite($fh, $out);
+					fwrite($fh, $out);  // phpcs:ignore
 					if (self::$_debug_output)
-						echo $out;
+						echo $out;		// phpcs:ignore
 				}
 			}
 
-			fclose($fh);
+			fclose($fh);  // phpcs:ignore
 		}
 	}
 }

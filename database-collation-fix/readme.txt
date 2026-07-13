@@ -1,12 +1,12 @@
 === Database Collation Fix ===
-Contributors: spectromtech, davejesch
+Contributors: davejesch
 Donate link: https://davejesch.com
-Tags: database, migration, collation algorithm, utf8mb4_unicode_520_ci, export, import, moving data, staging
+Tags: database, migration, collation algorithm, Illegal mix of collations
 Requires at least: 4.6
 Requires PHP: 5.3.1
-Tested up to: 6.4.2
-Stable tag: trunk
-License: GPLv2 or later
+Tested up to: 7.0
+Stable tag: 1.2.11
+License: GPLv2
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 Convert tables using utf8mb4_unicode_520_ci or utf8_unicode_520_ci collation to a more portable Collation Algorithm.
@@ -19,7 +19,7 @@ With the WordPress 5.7 update and WooCommerce 5.1, some users are reporting an e
 
 <strong>Usage Scenarios:</strong>
 
-While the plugin will work in any WordPress install: local, staging or live, it is specially designed to work with DesktopServer. Its process will be triggered and change the collation types on all database tables during any DesktopServer Create Site, Copy Site, Move Site, Import and Export operations. This allows you to import and export sites in the most compatible ways during deployments. If you would like to use this with DesktopServer as a Design Time plugin, you can install this in your /xampplite/ds-plugins/ directory and it can then be automatically activated and used with all of your local development web sites.
+This plugin will work in any WordPress install: local, staging or live.
 
 Alternatively, you can install this as a regular WordPress plugin on any site. Once activated, all of your database tables will be updated to use the more portable Collation Algorithm. If you are migrating your web site, you can install and activate the plugin then perform your database export. Once you have migrated your site, you can deactivate and remove the plugin as it would be no longer needed. If you will be exporting and/or migrating your site repeatedly, such as when using it on a test or staging install, you can leave the plugin active indefinitely and it will continue to monitor and update your database tables automatically, allowing you to perform migrations at any time. This is ideal in situations where you are installing or testing plugins that may create their own database tables, as these tables may be created with the newer Collation Algorithms that are not as portable.
 
@@ -59,7 +59,7 @@ or, you can upload the files directly to your server.
 
 = Is this safe? =
 
-Yes. The Database Collation Fix tool does not change any data. It only changes the Collation Algorithm that specified for your database columns and indexes.
+Yes. The Database Collation Fix tool does not change any data. It only changes the Collation Algorithm that is specified for your database columns and indexes.
 
 = Do I need to backup my data before using this? =
 
@@ -74,6 +74,9 @@ No. The Database Collation Fix tool changes the database. It only needs to do th
 1. Plugin page.
 
 == Changelog ==
+= 1.2.11 - Jul 9, 2026 =
+Fix vulnerabilty: CVE-2023-23997 sanitize and check forced algorithm against known list. Thanks to Mika for pointing this out.
+
 = 1.2.10 - Jan 16, 2024 =
 Fix bug: default clause on column not preserved. Thanks drylek.
 
